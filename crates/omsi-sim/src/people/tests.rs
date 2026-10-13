@@ -1074,3 +1074,26 @@ fn riders_are_drawn_on_the_bus_where_it_is_drawn() {
     assert!((p - drawn.world(local)).length() < 1e-6, "the rider stands on the drawn floor: {p:?}");
     assert!((h - (faces + 1.0)).abs() < 1e-9, "and turns with it: {h}");
 }
+
+/// A map's `drivers.txt` names the figures that drive its buses: when the people are drawn
+/// from everybody installed (no `humans.txt`), those figures stay out of the passengers.
+#[test]
+fn the_maps_drivers_are_not_passengers() {
+    let root = std::env::temp_dir().join(format!("omsi-drivers-out-{}", std::process::id()));
+    for (dir, name) in [("Humans/A", "Man.hum"), ("Humans/B", "Woman.hum"), ("Humans/London", "Driver.hum")] {
+        let d = root.join(dir);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join(name), "[model]\nmodel.cfg\n").unwrap();
+        std::fs::write(d.join("model.cfg"), "").unwrap();
+    }
+    let map = root.join("maps").join("Test");
+    std::fs::create_dir_all(&map).unwrap();
+    std::fs::write(map.join("drivers.txt"), "Humans\\London\\Driver.hum\n").unwrap();
+    let mut h = PeopleSim::new(Path::new("/nonexistent"), 10);
+    h.types = map_human_types(&root, &["Humans/A/Man.hum".into(), "Humans/B/Woman.hum".into(), "Humans/London/Driver.hum".into()]);
+    assert_eq!(h.types.len(), 3);
+    h.leave_out_drivers(&map);
+    std::fs::remove_dir_all(&root).ok();
+    let left: Vec<String> = h.types.iter().map(|t| t.def.path.file_name().unwrap().to_string_lossy().to_string()).collect();
+    assert_eq!(left, ["Man.hum", "Woman.hum"], "the driver is out, the others stay");
+}
