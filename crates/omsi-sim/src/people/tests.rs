@@ -1074,3 +1074,69 @@ fn riders_are_drawn_on_the_bus_where_it_is_drawn() {
     assert!((p - drawn.world(local)).length() < 1e-6, "the rider stands on the drawn floor: {p:?}");
     assert!((h - (faces + 1.0)).abs() < 1e-9, "and turns with it: {h}");
 }
+
+/// With a door open, a shut door with a button draws nobody -
+/// people walk to the open one; with every door shut, the button door is the one to wait at.
+#[test]
+fn a_shut_button_door_draws_nobody_while_another_door_is_open() {
+    let dir = std::env::temp_dir().join(format!("omsi-button-door-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let write = |name: &str, text: &str| std::fs::write(dir.join(name), text).unwrap();
+    // a door at the front right (point 0) and one at the rear right with a button (point 2)
+    write("paths.cfg", "[pathpnt]
+1.1
+4
+0.4
+[pathpnt]
+0
+0
+0.5
+[pathpnt]
+1.1
+-4
+0.4
+[pathlink]
+0
+1
+[pathlink]
+1
+2
+");
+    write("cabin.cfg", "[entry]
+0
+[entry]
+2
+{withbutton}
+[exit]
+2
+[passpos]
+-0.5
+0
+1.0
+0.45
+0
+");
+    let bus = omsi_vehicle::Vehicle {
+        path: dir.join("bus.bus"),
+        passenger_cabin: Some("cabin.cfg".into()),
+        paths: Some("paths.cfg".into()),
+        bounding_box: Some([2.5, 9.0, 3.0, 0.0, 0.0, 1.5]),
+        ..Default::default()
+    };
+    let cabin = Cabin::load_train(&[(&bus, Vec3::ZERO, f32::INFINITY)]).expect("cabin");
+    std::fs::remove_dir_all(&dir).ok();
+    let entries = cabin.entry_points();
+    assert_eq!(entries, [Some(0), Some(2)]);
+    let flags = cabin.entry_flags();
+    assert_eq!(flags[1].1, true, "the rear door has its button");
+    let (near_front, near_rear) = (Vec3::new(1.6, 4.0, 0.0), Vec3::new(1.6, -4.0, 0.0));
+    // every door shut: the button door, from wherever
+    assert_eq!(cabin.omsi_nearest(near_front, &entries, false, false, Some(&flags), Some(&[false, false])), Some(2));
+    // the front open, the rear shut with its button: the front, even from the rear
+    assert_eq!(cabin.omsi_nearest(near_rear, &entries, false, false, Some(&flags), Some(&[true, false])), Some(0));
+    // both open: the nearest
+    assert_eq!(cabin.omsi_nearest(near_rear, &entries, false, false, Some(&flags), Some(&[true, true])), Some(2));
+    // the exits: with one open, the shut one is passed by; with none, the nearest
+    let exits = cabin.exit_points();
+    assert_eq!(cabin.omsi_nearest(near_front, &exits, false, false, None, Some(&[true])), Some(2));
+}
